@@ -1,7 +1,7 @@
 # CI & ISO pipeline
 
 How Tromsø gets from `.bst` elements to a bootable, installable live ISO —
-and how to debug it when it breaks. (Same architecture as tuna-os/xfce-linux;
+and how to debug it when it breaks. (Same architecture as tuna-os/brussels;
 patterns originate in projectbluefin/dakota and dakota-iso.)
 
 ## Secure Boot key guard
@@ -176,17 +176,23 @@ or PR comments.
 
 | Date | Symptom | Root cause | Fix |
 |---|---|---|---|
+| 2026-11-24 | The publishing job checked out `coreos/chunkah` at its moving default branch into the build context | The checkout was unused and `actions.lock` does not pin the `repository:` input | Removed the step; `test_no_checkout_of_an_outside_repository_at_a_moving_ref` rejects unpinned outside checkouts |
+| 2026-11-24 | A manual run of `build-iso.yml` on a different branch signs the ISO and replaces `tromso-live-latest.iso` | The `publish` job had no condition on the ref, and `skip_upload` is `false` by default | The `publish` job runs only for `refs/heads/main`. Its self-check uses the README pattern; `test_iso_is_signed_and_published_only_from_main` |
+| 2026-11-24 | Two pushes to main evicted each other's in-progress checks, which reported `cancelled` | The concurrency group collapsed main pushes to one key with `cancel-in-progress: true` | Cancellation now applies only to pull requests and manual ISO dispatch; `test_push_runs_keep_their_checks` |
+| 2026-11-24 | A stable-ref build could publish an ungated `:stable` image and stable ISO | `build-final.yml` and `build-iso.yml` treated `refs/heads/stable` as a publish trigger | Removed the stable-ref writer; `test_only_promotion_and_rollback_publish_stable` |
 | 2026-11-13 | `Sign ISO` stops with exit code 137 after `Using payload from` (run 43385946786) | cosign 3 reads the whole ISO into memory. The 9 GB Tromsø ISO peaks above the 16 GB of runner RAM, so the kernel stops the job | Add a 16 GB swap file before signing; `test_iso_signing_has_swap_for_whole_iso_reads` |
 | 2026-11-13 | ISO signing fails on every run: `must specify --bundle with --new-bundle-format` (run 43353984640) | cosign-installer v4.1.3 installs cosign 3, which writes bundles by default and rejects the detached `--output-signature`/`--output-certificate` flags | Select cosign's legacy detached mode (`--use-signing-config=false --new-bundle-format=false`), require nonempty `.sig`/`.cert`, and run the README `cosign verify-blob` command before any upload; `test_iso_signing_preserves_detached_outputs_with_cosign3` |
 | 2026-11-03 | Python Tests fails with `No module named 'yaml'` (#449) | The workflow guard test imports PyYAML, but CI installs only pytest | Install PyYAML in the Python Tests job; `test_python_ci_installs_workflow_parser` checks this dependency |
 | 2026-11-03 | Public development signing keys could be selected for release inputs (#219) | Legacy key helper had no release policy or complete-import check | Reject public modes and snakeoil certificate identities before build/publish; workflow coverage in `test_release_workflows_enforce_guard` |
 | 2026-11-02 | STE fails with 493 findings against a zero budget (#428) | Seven existing documents contain long sentences, passive voice, gerunds, and noun clusters | Rewrite the flagged prose; preserve code examples and the zero budget |
 | 2026-10-24 | Unverified ISO could replace public latest (#334) | Upload preceded boot verification and ignored R2 failures | Boot gate precedes publication; immutable dated set completes before latest aliases; upload failures fail the job |
+| 2026-10-25 | Stale publication alert could coexist with a green staleness workflow | Alert creation succeeded even without a fresh build | Fail the check after maintaining the alert; an open stale-build alert excludes Beta eligibility (#278) |
 | 2026-10-24 | CI executes Actions and reusable workflows through mutable tags/branches (#375) | Moving references can change executable code without a repository review | Pin remote `uses:` to full commit SHAs and Docker Actions to SHA-256 digests; `test_github_actions_use_immutable_references` prevents regressions |
 | 2026-10-24 | Build workflows store GITHUB_TOKEN in plaintext `.git/config` during build jobs (#382) | `actions/checkout` defaults to `persist-credentials: true`, writing tokens readable by subsequent steps and containers | Add `persist-credentials: false` to all `actions/checkout` steps in `build-iso.yml` and `build-tromso-multirunner.yml`; enforced by `test_iso_invariants.py` |
 | 2026-10-24 | Four workflows inherited repository token defaults (#321) | Job-level permissions did not constrain other jobs | Add top-level `contents: read`; retain job overrides and require explicit workflow permissions in the invariant tests |
+| 2026-10-24 | Main publish stops in WebKitGTK CMake configuration (run 40064106136, #392) | WebKit 2.53.1 expands unset `_linked_into` into missing `if()` arguments in `_WEBKIT_TARGET_LINK_FRAMEWORK` | Backport the exact condition from WebKitGTK 2.54.1 used by gnome-build-meta; keep variable names unexpanded so CMake handles the unset value |
 | 2026-07-19 | Every `just` call in CI fails: "multiple candidate justfiles" | `justfile` + `Justfile` both at root; just ≥1.30 hard-errors | ISO recipes moved to `iso.justfile`, imported from `Justfile` |
-| 2026-07-19 | `just iso-sd-boot tromso` in build-iso.yml never worked | recipe + `tromso/Containerfile` + dracut module never existed in this repo | ported from xfce-linux/dakota-iso (PR #74) |
+| 2026-07-19 | `just iso-sd-boot tromso` in build-iso.yml never worked | recipe + `tromso/Containerfile` + dracut module never existed in this repo | ported from brussels/dakota-iso (PR #74) |
 | 2026-07-19 | `tromso/Containerfile` missing from git after commit | `.gitignore` had unanchored `Containerfile` rule | anchored to `/Containerfile` |
 | 2026-07-19 | All 10 chunk jobs building for 5+ h | `project.conf` `name:` aurora→tromso changed every cache key → world rebuild | expected one-time cost; caches repopulate |
 | 2026-07-19 | Installer flatpak never launched in live session | ISO baked `org.bootcinstaller.Installer` but autostart/symlink pointed elsewhere | both sides now use `org.tunaos.InstallerKde` |
@@ -197,12 +203,14 @@ or PR comments.
 | 2026-10-03 | `build_final` (run 37102603548) fails in `oci/kde-linux/image.bst`: `glib-compile-schemas` exit 127 | the element never declared `components/glib.bst`; first reached once the setcap fix let the compose elements integrate | `freedesktop-sdk.bst:components/glib.bst` added to its build-depends (as `oci/tromso.bst` already has) |
 | 2026-10-04 | First published `tromso:latest` breaks the ISO/E2E `container` recipe: `buildah commit --squash` fails with `lstat /etc/alsa/conf.d/50-arcam-av-ctl.conf: no such file or directory`; 65 `c?????????` entries in the mounted image | freedesktop-sdk build-oci `analyze_lowers()` dropped only the directory entry on a `.wh.<dir>` whiteout, not its descendants. The kde-linux layer whites out `/etc/alsa` (and `/etc/fonts`, `/usr/share/licenses/freedesktop-sdk`); the tromso layer recreates them and build-oci then emitted whiteouts for files that no longer exist. Over a whiteout the recreated directory is not merged, so overlayfs lists those whiteouts as unstattable char devices | `patches/freedesktop-sdk/0012` fixes `analyze_lowers()`; build_final fails on any char device in the exported image; `.gitignore` no longer swallows new `patches/` files |
 
-| 2026-07-20 | Multi-runner `build_deps` chunk jobs queued for 20+ min when `tromso` and `xfce-linux` built simultaneously | Simultaneous schedule triggers and push builds across repos reached free-tier org concurrency cap (~20 jobs) | Removed push triggers; staggered daily crons (xfce-linux at 23:30 UTC, tromso at 00:30 UTC) and accepted residual manual-dispatch contention as free-runner trade-off (tromso#93) |
+| 2026-07-20 | Multi-runner `build_deps` chunk jobs queued for 20+ min when `tromso` and `brussels` built simultaneously | Simultaneous schedule triggers and push builds across repos reached free-tier org concurrency cap (~20 jobs) | Removed push triggers; staggered daily crons (xfce-linux at 23:30 UTC, tromso at 00:30 UTC) and accepted residual manual-dispatch contention as free-runner trade-off (tromso#93) |
 | 2026-08-12 | Daily `chore(deps): track element sources` PR red on `Build changed elements` (`tromso/glow.bst`: `go: download go1.26.5 … lookup proxy.golang.org … connection refused`) | `glow.bst`/`gum.bst` run `go mod download` in build-commands, but the BuildStream sandbox has no network; they are orphaned (absent from `tromso/deps.bst`), so the world build never built them and only a ref bump touching the file exposes it. glow v3.0.0 additionally wants a Go toolchain newer than freedesktop-sdk 25.08 ships | Both excluded from `track-bst-sources.yml` via `TRACK_EXCLUDE` so a broken element can't block buildable ref bumps. #180 merged red, so glow stays at v3.0.0 on main: reverting the ref would touch the file and trip the same gate. Re-include (and repair the ref) once they vendor modules (`-mod=vendor`, as `uupd.bst` and `kde-linux-deps/toolbox.bst` do) |
 | 2026-07-20 | Runner agent process crashes mid-build (`System.IO.IOException: No space left on device`) on heavy chunks (`util-linux-full`, `cryptsetup`, `pwquality`), bypassing `if: always()` CAS salvage | `ublue-os/remove-unwanted-software@v9` freed insufficient disk space compared to `jlumbroso/free-disk-space` (which removes tool-cache), leaving ~25GB instead of ~45GB free | Upstreamed `jlumbroso/free-disk-space@v5` (`tool-cache: true`) to `build_core` in `tuna-os/bst-ci` (matching `build_deps` and `build_final`), increasing free disk space for heavy dependency closures (tromso#96) |
 
 Add rows to this table as you change CI. See the organization `ci-fix-loop`
-skill. The `docs/ci-troubleshooting.md` file in tuna-os/tunaos shows the format.
+skill. The
+[failure catalog](https://github.com/tuna-os/tunaos/blob/main/docs/ci-troubleshooting/failure-catalog.md)
+in tuna-os/tunaos shows the format.
 
 ## Channels: nightly (main) and stable
 
@@ -290,7 +298,7 @@ design gives one shared CAS and one final signer.
 Post-merge: salvage-enabled nightly world build → ISO boot gate
 (ready-marker + screenshot artifact) → weekly LUKS install e2e
 (screenshots and serial logs in Actions artifacts). A cloud
-routine ("tromso + xfce-linux CI babysitter", every 3 h) diagnoses
+routine ("tromso + brussels CI babysitter", every 3 h) diagnoses
 completed failures from logs and pushes fixes.
 
 **Rules that keep this healthy:** do not add `paths:` filters to workflows
